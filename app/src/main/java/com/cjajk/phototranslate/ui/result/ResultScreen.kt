@@ -124,7 +124,6 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
             }
     }
 
-    // 点词翻译
     LaunchedEffect(selected) {
         wordTranslate = TranslateState.Idle
         val word = selected ?: return@LaunchedEffect
@@ -139,7 +138,6 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
         }
     }
 
-    // 整段翻译
     LaunchedEffect(wholeRequested) {
         if (!wholeRequested) return@LaunchedEffect
         wholeTranslate = TranslateState.Loading
@@ -351,13 +349,6 @@ private fun OcrOverlay(
         Box(
             Modifier
                 .fillMaxSize()
-                .graphicsLayer {
-                    scaleX = userScale
-                    scaleY = userScale
-                    translationX = userOffset.x
-                    translationY = userOffset.y
-                    transformOrigin = TransformOrigin(0f, 0f)
-                }
                 .pointerInput(boxes, fitScale, offX, offY) {
                     coroutineScope {
                         launch {
@@ -370,30 +361,42 @@ private fun OcrOverlay(
                         launch {
                             detectTapGestures { tap ->
                                 val inv = (tap - userOffset) / userScale
-                                nearestBox(inv, boxes, fitScale, offX, offY)?.let(onWordTap)
+                                pickBox(inv, boxes, fitScale, offX, offY, userScale)?.let(onWordTap)
                             }
                         }
                     }
                 }
         ) {
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Fit
-            )
-            Canvas(Modifier.fillMaxSize()) {
-                boxes.forEach { wb ->
-                    val left = wb.box.left * fitScale + offX
-                    val top = wb.box.top * fitScale + offY
-                    val right = wb.box.right * fitScale + offX
-                    val bottom = wb.box.bottom * fitScale + offY
-                    drawRect(
-                        color = Color(0xFF1E88E5).copy(alpha = 0.6f),
-                        topLeft = Offset(left, top),
-                        size = Size(right - left, bottom - top),
-                        style = Stroke(width = 2f)
-                    )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = userScale
+                        scaleY = userScale
+                        translationX = userOffset.x
+                        translationY = userOffset.y
+                        transformOrigin = TransformOrigin(0f, 0f)
+                    }
+            ) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+                Canvas(Modifier.fillMaxSize()) {
+                    boxes.forEach { wb ->
+                        val left = wb.box.left * fitScale + offX
+                        val top = wb.box.top * fitScale + offY
+                        val right = wb.box.right * fitScale + offX
+                        val bottom = wb.box.bottom * fitScale + offY
+                        drawRect(
+                            color = Color(0xFF1E88E5).copy(alpha = 0.6f),
+                            topLeft = Offset(left, top),
+                            size = Size(right - left, bottom - top),
+                            style = Stroke(width = 2f)
+                        )
+                    }
                 }
             }
         }
@@ -413,14 +416,33 @@ private fun OcrOverlay(
     }
 }
 
-private fun nearestBox(
+private fun pickBox(
     tap: Offset,
     boxes: List<WordBox>,
     scale: Float,
     offX: Float,
-    offY: Float
+    offY: Float,
+    zoom: Float
 ): WordBox? {
-    val threshold = 130f
+    val pad = 6f / zoom
+    var inside: WordBox? = null
+    var insideArea = Float.MAX_VALUE
+    boxes.forEach { wb ->
+        val l = wb.box.left * scale + offX
+        val t = wb.box.top * scale + offY
+        val r = wb.box.right * scale + offX
+        val b = wb.box.bottom * scale + offY
+        if (tap.x in (l - pad)..(r + pad) && tap.y in (t - pad)..(b + pad)) {
+            val area = (r - l) * (b - t)
+            if (area < insideArea) {
+                insideArea = area
+                inside = wb
+            }
+        }
+    }
+    if (inside != null) return inside
+
+    val threshold = 90f / zoom
     var best: WordBox? = null
     var bestDist = threshold * threshold
     boxes.forEach { wb ->
