@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -24,13 +25,16 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.cjajk.phototranslate.ui.favorites.FavoritesScreen
+import com.cjajk.phototranslate.ui.history.HistoryScreen
 import com.cjajk.phototranslate.ui.home.HomeScreen
 import com.cjajk.phototranslate.ui.result.ResultScreen
 import com.cjajk.phototranslate.ui.settings.SettingsScreen
+import java.io.File
 
 object Routes {
     const val HOME = "home"
     const val RESULT = "result?uri={uri}"
+    const val HISTORY = "history"
     const val FAVORITES = "favorites"
     const val SETTINGS = "settings"
 
@@ -63,6 +67,11 @@ fun PhotoTranslateApp() {
                     ResultScreen(uri = uri, onBack = { navController.popBackStack() })
                 }
             }
+            composable(Routes.HISTORY) {
+                HistoryScreen(onOpen = { path ->
+                    navController.navigate(Routes.result(Uri.fromFile(File(path)).toString()))
+                })
+            }
             composable(Routes.FAVORITES) { FavoritesScreen() }
             composable(Routes.SETTINGS) { SettingsScreen() }
         }
@@ -75,6 +84,7 @@ private fun AppBottomBar(navController: NavHostController) {
     val currentRoute = backStack?.destination?.route
     val items: List<Triple<String, String, ImageVector>> = listOf(
         Triple(Routes.HOME, "拍照", Icons.Filled.Home),
+        Triple(Routes.HISTORY, "历史", Icons.Filled.List),
         Triple(Routes.FAVORITES, "收藏", Icons.Filled.Favorite),
         Triple(Routes.SETTINGS, "设置", Icons.Filled.Settings)
     )

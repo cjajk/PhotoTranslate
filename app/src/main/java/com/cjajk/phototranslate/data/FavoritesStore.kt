@@ -43,6 +43,7 @@ object FavoritesStore {
             FavoriteItem(
                 text = o.getString("text"),
                 type = o.getString("type"),
+                translation = o.optString("translation", ""),
                 createdAt = o.getLong("createdAt")
             )
         }
@@ -55,6 +56,7 @@ object FavoritesStore {
                 JSONObject()
                     .put("text", item.text)
                     .put("type", item.type)
+                    .put("translation", item.translation)
                     .put("createdAt", item.createdAt)
             )
         }

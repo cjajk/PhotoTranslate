@@ -6,20 +6,33 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.ExifInterface
 import android.net.Uri
+import java.io.File
 
 object BitmapLoader {
 
     private const val MAX_DIMENSION = 1600
 
     fun loadRotated(context: Context, uri: Uri): Bitmap? = runCatching {
-        val orientation = context.contentResolver.openInputStream(uri)?.use { stream ->
-            ExifInterface(stream).getAttributeInt(
-                ExifInterface.TAG_ORIENTATION,
-                ExifInterface.ORIENTATION_NORMAL
-            )
-        } ?: ExifInterface.ORIENTATION_NORMAL
+        val path = if (uri.scheme == "file") uri.path else null
+        val orientation = if (path != null) {
+            runCatching {
+                ExifInterface(File(path)).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL
+                )
+            }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        } else {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                runCatching {
+                    ExifInterface(stream).getAttributeInt(
+                        ExifInterface.TAG_ORIENTATION,
+                        ExifInterface.ORIENTATION_NORMAL
+                    )
+                }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+            } ?: ExifInterface.ORIENTATION_NORMAL
+        }
 
-        val bitmap = decodeSampled(context, uri) ?: return null
+        val bitmap = decodeSampled(context, uri, path) ?: return null
         val matrix = Matrix()
         when (orientation) {
             ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
@@ -32,10 +45,26 @@ object BitmapLoader {
         else Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }.getOrNull()
 
-    private fun decodeSampled(context: Context, uri: Uri): Bitmap? {
+    /** 历史列表缩略图。 */
+    fun loadThumbnail(path: String, maxDim: Int = 320): Bitmap? = runCatching {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, bounds)
+        BitmapFactory.decodeFile(path, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        var sample = 1
+        while (bounds.outWidth / sample > maxDim || bounds.outHeight / sample > maxDim) {
+            sample *= 2
+        }
+        BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+    }.getOrNull()
+
+    private fun decodeSampled(context: Context, uri: Uri, path: String?): Bitmap? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        if (path != null) {
+            BitmapFactory.decodeFile(path, bounds)
+        } else {
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, bounds)
+            }
         }
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
@@ -44,7 +73,8 @@ object BitmapLoader {
             sample *= 2
         }
         val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-        return context.contentResolver.openInputStream(uri)?.use {
+        return if (path != null) BitmapFactory.decodeFile(path, opts)
+        else context.contentResolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it, null, opts)
         }
     }

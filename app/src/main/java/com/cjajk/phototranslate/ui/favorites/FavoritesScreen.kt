@@ -71,6 +71,15 @@ fun FavoritesScreen() {
                         ) {
                             Column(Modifier.weight(1f)) {
                                 Text(item.text, style = MaterialTheme.typography.titleMedium)
+                                item.translation.takeIf { it.isNotBlank() }?.let {
+                                    Text(
+                                        "译：$it",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 3,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
                                 Text(
                                     if (item.type == "WORD") "单词" else "句子",
                                     style = MaterialTheme.typography.bodySmall,

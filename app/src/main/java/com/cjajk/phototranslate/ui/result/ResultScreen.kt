@@ -8,14 +8,18 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -43,13 +47,19 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cjajk.phototranslate.data.FavoritesStore
+import com.cjajk.phototranslate.data.HistoryStore
+import com.cjajk.phototranslate.data.SettingsStore
 import com.cjajk.phototranslate.model.FavoriteItem
 import com.cjajk.phototranslate.model.WordBox
 import com.cjajk.phototranslate.ocr.OcrManager
+import com.cjajk.phototranslate.translate.createTranslator
 import com.cjajk.phototranslate.util.BitmapLoader
+import java.io.File
 import kotlin.comparisons.minOf
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 private sealed interface OcrStatus {
@@ -59,6 +69,13 @@ private sealed interface OcrStatus {
     data class Error(val message: String) : OcrStatus
 }
 
+private sealed interface TranslateState {
+    object Idle : TranslateState
+    object Loading : TranslateState
+    data class Done(val text: String) : TranslateState
+    data class Error(val message: String) : TranslateState
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ResultScreen(uri: Uri, onBack: () -> Unit) {
@@ -66,8 +83,12 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     var boxes by remember { mutableStateOf<List<WordBox>>(emptyList()) }
+    var resultLines by remember { mutableStateOf<List<String>>(emptyList()) }
     var status by remember { mutableStateOf<OcrStatus>(OcrStatus.Loading) }
     var selected by remember { mutableStateOf<WordBox?>(null) }
+    var wordTranslate by remember { mutableStateOf<TranslateState>(TranslateState.Idle) }
+    var wholeTranslate by remember { mutableStateOf<TranslateState>(TranslateState.Idle) }
+    var wholeRequested by remember { mutableStateOf(false) }
     var favorited by remember { mutableStateOf(false) }
 
     LaunchedEffect(uri) {
@@ -79,13 +100,52 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
         }
         bitmap = bmp
         runCatching { OcrManager.recognize(bmp) }
-            .onSuccess { words ->
-                boxes = words
-                status = if (words.isEmpty()) OcrStatus.Empty else OcrStatus.Done
+            .onSuccess { result ->
+                boxes = result.boxes
+                resultLines = result.lines
+                status = if (result.boxes.isEmpty()) OcrStatus.Empty else OcrStatus.Done
+                if (result.lines.isNotEmpty()) {
+                    val historyDir = File(context.filesDir, "history").absolutePath
+                    val isHistory = uri.scheme == "file" && uri.path?.startsWith(historyDir) == true
+                    val imagePath = if (isHistory) uri.path
+                    else HistoryStore.saveImage(context, uri)
+                    imagePath?.let { HistoryStore.add(context, it, result.lines) }
+                }
             }
             .onFailure { e ->
                 status = OcrStatus.Error(e.message ?: "OCR 失败（设备可能缺少 Google Play 服务）")
             }
+    }
+
+    // 点词翻译
+    LaunchedEffect(selected) {
+        wordTranslate = TranslateState.Idle
+        val word = selected ?: return@LaunchedEffect
+        wordTranslate = TranslateState.Loading
+        wordTranslate = try {
+            val settings = SettingsStore.settings(context).first()
+            val text = createTranslator(settings.engineType, settings.appId, settings.apiKey)
+                .translate(word.text)
+            TranslateState.Done(text)
+        } catch (e: Exception) {
+            TranslateState.Error(e.message ?: "翻译失败")
+        }
+    }
+
+    // 整段翻译
+    LaunchedEffect(wholeRequested) {
+        if (!wholeRequested) return@LaunchedEffect
+        wholeTranslate = TranslateState.Loading
+        wholeTranslate = try {
+            val text = resultLines.joinToString(" ")
+            if (text.isBlank()) throw IllegalStateException("没有可翻译的文本")
+            val settings = SettingsStore.settings(context).first()
+            val translated = createTranslator(settings.engineType, settings.appId, settings.apiKey)
+                .translate(text)
+            TranslateState.Done(translated)
+        } catch (e: Exception) {
+            TranslateState.Error(e.message ?: "翻译失败")
+        }
     }
 
     Scaffold(
@@ -135,17 +195,33 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
             OcrStatus.Done -> {
                 val bmp = bitmap
                 if (bmp != null) {
-                    OcrOverlay(
-                        bitmap = bmp,
-                        boxes = boxes,
-                        onWordTap = { word ->
-                            selected = word
-                            favorited = false
-                        },
-                        modifier = Modifier
+                    Column(
+                        Modifier
                             .fillMaxSize()
                             .padding(padding)
-                    )
+                    ) {
+                        if (resultLines.isNotEmpty()) {
+                            WholeTranslateCard(
+                                lines = resultLines,
+                                state = wholeTranslate,
+                                onRequest = { wholeRequested = true },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            )
+                        }
+                        OcrOverlay(
+                            bitmap = bmp,
+                            boxes = boxes,
+                            onWordTap = { word ->
+                                selected = word
+                                favorited = false
+                            },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .weight(1f)
+                        )
+                    }
                 }
             }
         }
@@ -160,10 +236,24 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
             ) {
                 Text(word.text, style = MaterialTheme.typography.headlineSmall)
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    "译文：翻译引擎下一版接入（设置页可先保存 API Key）",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                when (val t = wordTranslate) {
+                    TranslateState.Idle -> {}
+                    TranslateState.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("翻译中…", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    is TranslateState.Done -> Text(
+                        t.text,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    is TranslateState.Error -> Text(
+                        t.message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
                 Spacer(Modifier.height(20.dp))
                 Button(
                     onClick = {
@@ -173,6 +263,7 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
                                 FavoriteItem(
                                     text = word.text,
                                     type = if (word.text.contains(" ")) "SENTENCE" else "WORD",
+                                    translation = (wordTranslate as? TranslateState.Done)?.text ?: "",
                                     createdAt = System.currentTimeMillis()
                                 )
                             )
@@ -185,6 +276,47 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
                     Text(if (favorited) "已收藏" else "收藏到复习")
                 }
                 Spacer(Modifier.height(24.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun WholeTranslateCard(
+    lines: List<String>,
+    state: TranslateState,
+    onRequest: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(modifier) {
+        Column(Modifier.padding(12.dp)) {
+            Text(
+                lines.joinToString(" "),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = onRequest, modifier = Modifier.fillMaxWidth()) {
+                Text("翻译整段")
+            }
+            when (val t = state) {
+                TranslateState.Idle -> {}
+                TranslateState.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("翻译中…", style = MaterialTheme.typography.bodyMedium)
+                }
+                is TranslateState.Done -> Text(
+                    t.text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                is TranslateState.Error -> Text(
+                    t.message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
         }
     }

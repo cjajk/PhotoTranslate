@@ -39,20 +39,22 @@ fun SettingsScreen() {
     val settings by SettingsStore.settings(context).collectAsState(initial = AppSettings())
 
     var engine by remember { mutableStateOf(settings.engineType) }
+    var appId by remember { mutableStateOf(settings.appId) }
     var key by remember { mutableStateOf(settings.apiKey) }
     var saved by remember { mutableStateOf(false) }
 
     LaunchedEffect(settings) {
         engine = settings.engineType
+        appId = settings.appId
         key = settings.apiKey
     }
 
     val engines = listOf(
-        "baidu" to "百度翻译",
-        "tencent" to "腾讯翻译君",
-        "deepl" to "DeepL",
-        "openai" to "OpenAI 兼容接口",
-        "offline" to "离线模型（ML Kit）"
+        "baidu" to "百度翻译（已接入）",
+        "youdao" to "有道智云（已接入）",
+        "tencent" to "腾讯翻译君（预留）",
+        "deepl" to "DeepL（预留）",
+        "offline" to "离线模型（预留）"
     )
 
     Scaffold(
@@ -65,7 +67,7 @@ fun SettingsScreen() {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("翻译引擎（下一版接入翻译功能）", style = MaterialTheme.typography.titleMedium)
+            Text("翻译引擎", style = MaterialTheme.typography.titleMedium)
             engines.forEach { (value, label) ->
                 Row(
                     modifier = Modifier
@@ -84,19 +86,29 @@ fun SettingsScreen() {
                 }
             }
             OutlinedTextField(
+                value = appId,
+                onValueChange = {
+                    appId = it
+                    saved = false
+                },
+                label = { Text("APP ID / 应用ID") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+            OutlinedTextField(
                 value = key,
                 onValueChange = {
                     key = it
                     saved = false
                 },
-                label = { Text("API Key") },
+                label = { Text("密钥 / 应用密钥") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
             Button(
                 onClick = {
                     scope.launch {
-                        SettingsStore.save(context, engine, key.trim())
+                        SettingsStore.save(context, engine, appId.trim(), key.trim())
                         saved = true
                     }
                 },
@@ -105,7 +117,8 @@ fun SettingsScreen() {
                 Text(if (saved) "已保存" else "保存")
             }
             Text(
-                "Key 仅保存在本机（DataStore），不会上传。",
+                "密钥仅保存在本机（DataStore），不会上传。\n" +
+                    "百度翻译开放平台、有道智云注册均为免费，把 APP ID 与密钥填到这里即可翻译。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
