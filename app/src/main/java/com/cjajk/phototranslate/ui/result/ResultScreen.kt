@@ -49,7 +49,7 @@ import com.cjajk.phototranslate.model.FavoriteItem
 import com.cjajk.phototranslate.model.WordBox
 import com.cjajk.phototranslate.ocr.OcrManager
 import com.cjajk.phototranslate.util.BitmapLoader
-import kotlin.math.minOf
+import kotlin.comparisons.minOf
 import kotlinx.coroutines.launch
 
 private sealed interface OcrStatus {
