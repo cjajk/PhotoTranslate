@@ -35,7 +35,14 @@ fun HomeScreen(onImageSelected: (Uri) -> Unit) {
     val takePicture = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success ->
-        captureUri?.let { if (success) onImageSelected(it) }
+        captureUri?.let { uri ->
+            if (success) {
+                onImageSelected(uri)
+            } else {
+                // 拍照取消：清理 cache 残图，避免长期堆积
+                runCatching { uri.path?.let { File(it).delete() } }
+            }
+        }
     }
 
     val pickImage = rememberLauncherForActivityResult(
@@ -89,7 +96,7 @@ fun HomeScreen(onImageSelected: (Uri) -> Unit) {
         }
         Spacer(Modifier.height(32.dp))
         Text(
-            "v0.1：拍照/选图 + OCR 词框 + 点词收藏；翻译引擎将在下一版接入",
+            "v0.3：拍照/选图 + 点词完整释义 + 整段翻译 + 查词 + 历史收藏；翻译引擎在设置页配置",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

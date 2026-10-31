@@ -18,11 +18,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,6 +36,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import com.cjajk.phototranslate.data.HistoryStore
 import com.cjajk.phototranslate.util.BitmapLoader
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -51,10 +59,23 @@ import java.util.Locale
 @Composable
 fun HistoryScreen(onOpen: (String) -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val items by HistoryStore.history(context).collectAsState(initial = emptyList())
+    var confirmClear by remember { mutableStateOf(false) }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("历史记录") }) }
+        topBar = {
+            TopAppBar(
+                title = { Text("历史记录") },
+                actions = {
+                    if (items.isNotEmpty()) {
+                        IconButton(onClick = { confirmClear = true }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "清空历史")
+                        }
+                    }
+                }
+            )
+        }
     ) { padding ->
         if (items.isEmpty()) {
             Box(
@@ -105,6 +126,23 @@ fun HistoryScreen(onOpen: (String) -> Unit) {
                 }
             }
         }
+    }
+
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("清空历史") },
+            text = { Text("将删除全部历史记录及已保存的照片，且不可恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmClear = false
+                    scope.launch { HistoryStore.clearAll(context) }
+                }) { Text("清空") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClear = false }) { Text("取消") }
+            }
+        )
     }
 }
 

@@ -76,7 +76,7 @@ fun FavoritesScreen() {
                                         "译：$it",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 3,
+                                        maxLines = 6,
                                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                                     )
                                 }

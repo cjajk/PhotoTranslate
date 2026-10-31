@@ -6,6 +6,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -28,6 +29,7 @@ import com.cjajk.phototranslate.ui.favorites.FavoritesScreen
 import com.cjajk.phototranslate.ui.history.HistoryScreen
 import com.cjajk.phototranslate.ui.home.HomeScreen
 import com.cjajk.phototranslate.ui.result.ResultScreen
+import com.cjajk.phototranslate.ui.search.SearchScreen
 import com.cjajk.phototranslate.ui.settings.SettingsScreen
 import com.cjajk.phototranslate.ui.settings.TutorialScreen
 import java.io.File
@@ -37,6 +39,7 @@ object Routes {
     const val RESULT = "result?uri={uri}"
     const val HISTORY = "history"
     const val FAVORITES = "favorites"
+    const val SEARCH = "search"
     const val SETTINGS = "settings"
     const val TUTORIAL = "tutorial"
 
@@ -47,8 +50,12 @@ object Routes {
 @Composable
 fun PhotoTranslateApp() {
     val navController = rememberNavController()
+    val backStack by navController.currentBackStackEntryAsState()
+    val currentRoute = backStack?.destination?.route
+    // 结果页与教程页为全屏详情页，隐藏底部导航给图片更多可视空间
+    val hideBottom = currentRoute == Routes.RESULT || currentRoute == Routes.TUTORIAL
     Scaffold(
-        bottomBar = { AppBottomBar(navController) }
+        bottomBar = { if (!hideBottom) AppBottomBar(navController) }
     ) { padding ->
         NavHost(
             navController = navController,
@@ -75,6 +82,7 @@ fun PhotoTranslateApp() {
                 })
             }
             composable(Routes.FAVORITES) { FavoritesScreen() }
+            composable(Routes.SEARCH) { SearchScreen() }
             composable(Routes.SETTINGS) {
                 SettingsScreen(onOpenTutorial = { navController.navigate(Routes.TUTORIAL) })
             }
@@ -91,6 +99,7 @@ private fun AppBottomBar(navController: NavHostController) {
     val currentRoute = backStack?.destination?.route
     val items: List<Triple<String, String, ImageVector>> = listOf(
         Triple(Routes.HOME, "拍照", Icons.Filled.Home),
+        Triple(Routes.SEARCH, "查词", Icons.Filled.Search),
         Triple(Routes.HISTORY, "历史", Icons.Filled.List),
         Triple(Routes.FAVORITES, "收藏", Icons.Filled.Favorite),
         Triple(Routes.SETTINGS, "设置", Icons.Filled.Settings)
