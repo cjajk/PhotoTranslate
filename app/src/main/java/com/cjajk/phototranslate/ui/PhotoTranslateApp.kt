@@ -29,6 +29,7 @@ import com.cjajk.phototranslate.ui.history.HistoryScreen
 import com.cjajk.phototranslate.ui.home.HomeScreen
 import com.cjajk.phototranslate.ui.result.ResultScreen
 import com.cjajk.phototranslate.ui.settings.SettingsScreen
+import com.cjajk.phototranslate.ui.settings.TutorialScreen
 import java.io.File
 
 object Routes {
@@ -37,6 +38,7 @@ object Routes {
     const val HISTORY = "history"
     const val FAVORITES = "favorites"
     const val SETTINGS = "settings"
+    const val TUTORIAL = "tutorial"
 
     fun result(uri: String): String = "result?uri=${Uri.encode(uri)}"
 }
@@ -73,7 +75,12 @@ fun PhotoTranslateApp() {
                 })
             }
             composable(Routes.FAVORITES) { FavoritesScreen() }
-            composable(Routes.SETTINGS) { SettingsScreen() }
+            composable(Routes.SETTINGS) {
+                SettingsScreen(onOpenTutorial = { navController.navigate(Routes.TUTORIAL) })
+            }
+            composable(Routes.TUTORIAL) {
+                TutorialScreen(onBack = { navController.popBackStack() })
+            }
         }
     }
 }

@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -32,17 +34,21 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -59,6 +65,7 @@ import com.cjajk.phototranslate.translate.createTranslator
 import com.cjajk.phototranslate.util.BitmapLoader
 import java.io.File
 import kotlin.comparisons.minOf
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -330,21 +337,42 @@ private fun OcrOverlay(
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
-    BoxWithConstraints(modifier) {
+    var userScale by remember { mutableFloatStateOf(1f) }
+    var userOffset by remember { mutableStateOf(Offset.Zero) }
+    BoxWithConstraints(modifier.clipToBounds()) {
         val cw = with(density) { maxWidth.toPx() }
         val ch = with(density) { maxHeight.toPx() }
         val imgW = bitmap.width
         val imgH = bitmap.height
-        val scale = minOf(cw / imgW, ch / imgH)
-        val offX = (cw - imgW * scale) / 2f
-        val offY = (ch - imgH * scale) / 2f
+        val fitScale = minOf(cw / imgW, ch / imgH)
+        val offX = (cw - imgW * fitScale) / 2f
+        val offY = (ch - imgH * fitScale) / 2f
 
         Box(
             Modifier
                 .fillMaxSize()
-                .pointerInput(boxes, scale, offX, offY) {
-                    detectTapGestures { offset ->
-                        nearestBox(offset, boxes, scale, offX, offY)?.let(onWordTap)
+                .graphicsLayer {
+                    scaleX = userScale
+                    scaleY = userScale
+                    translationX = userOffset.x
+                    translationY = userOffset.y
+                    transformOrigin = TransformOrigin(0f, 0f)
+                }
+                .pointerInput(boxes, fitScale, offX, offY) {
+                    coroutineScope {
+                        launch {
+                            detectTransformGestures { centroid, pan, zoom, _ ->
+                                val newScale = (userScale * zoom).coerceIn(1f, 6f)
+                                userOffset = (userOffset + centroid) * (newScale / userScale) - centroid + pan
+                                userScale = newScale
+                            }
+                        }
+                        launch {
+                            detectTapGestures { tap ->
+                                val inv = (tap - userOffset) / userScale
+                                nearestBox(inv, boxes, fitScale, offX, offY)?.let(onWordTap)
+                            }
+                        }
                     }
                 }
         ) {
@@ -356,10 +384,10 @@ private fun OcrOverlay(
             )
             Canvas(Modifier.fillMaxSize()) {
                 boxes.forEach { wb ->
-                    val left = wb.box.left * scale + offX
-                    val top = wb.box.top * scale + offY
-                    val right = wb.box.right * scale + offX
-                    val bottom = wb.box.bottom * scale + offY
+                    val left = wb.box.left * fitScale + offX
+                    val top = wb.box.top * fitScale + offY
+                    val right = wb.box.right * fitScale + offX
+                    val bottom = wb.box.bottom * fitScale + offY
                     drawRect(
                         color = Color(0xFF1E88E5).copy(alpha = 0.6f),
                         topLeft = Offset(left, top),
@@ -367,6 +395,19 @@ private fun OcrOverlay(
                         style = Stroke(width = 2f)
                     )
                 }
+            }
+        }
+        if (userScale > 1.01f || userOffset != Offset.Zero) {
+            IconButton(
+                onClick = {
+                    userScale = 1f
+                    userOffset = Offset.Zero
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(12.dp)
+            ) {
+                Icon(Icons.Filled.Refresh, contentDescription = "重置视图")
             }
         }
     }
