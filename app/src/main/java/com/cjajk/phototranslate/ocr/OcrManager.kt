@@ -12,7 +12,9 @@ import kotlinx.coroutines.withContext
 data class OcrResult(
     val boxes: List<WordBox>,
     /** 按阅读顺序排列的行级完整文本，用于整句/全文翻译。 */
-    val lines: List<String>
+    val lines: List<String>,
+    /** block 级段落分组（每段为行文本列表），整段翻译按段落拼接与分块。 */
+    val paragraphs: List<List<String>>
 )
 
 object OcrManager {
@@ -21,7 +23,7 @@ object OcrManager {
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
 
-    /** 返回词级词框 + 行级文本；词级缺失时回退到行级。 */
+    /** 返回词级词框 + 行级文本 + 段落分组；词级缺失时回退到行级。 */
     suspend fun recognize(bitmap: Bitmap): OcrResult = withContext(Dispatchers.Default) {
         val text = Tasks.await(recognizer.process(InputImage.fromBitmap(bitmap, 0)))
         val blocks = text.textBlocks
@@ -38,14 +40,21 @@ object OcrManager {
             }
         }.filter { it.text.isNotBlank() && !it.box.isEmpty }
 
-        val lines = blocks.sortedBy { it.boundingBox?.top ?: 0 }
+        val sortedBlocks = blocks.sortedBy { it.boundingBox?.top ?: 0 }
+        val lines = sortedBlocks
             .flatMap { block ->
                 block.lines.sortedBy { it.boundingBox?.top ?: 0 }
             }
             .map { it.text.trim() }
             .filter { it.isNotBlank() }
 
-        OcrResult(boxes = boxes, lines = lines)
+        val paragraphs = sortedBlocks.map { block ->
+            block.lines.sortedBy { it.boundingBox?.top ?: 0 }
+                .map { it.text.trim() }
+                .filter { it.isNotBlank() }
+        }.filter { it.isNotEmpty() }
+
+        OcrResult(boxes = boxes, lines = lines, paragraphs = paragraphs)
     }
 
     fun close() {

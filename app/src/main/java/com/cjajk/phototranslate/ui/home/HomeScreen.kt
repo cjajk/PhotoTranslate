@@ -31,18 +31,23 @@ import java.io.File
 fun HomeScreen(onImageSelected: (Uri) -> Unit) {
     val context = LocalContext.current
     var captureUri by remember { mutableStateOf<Uri?>(null) }
+    var captureFile by remember { mutableStateOf<File?>(null) }
 
     val takePicture = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success ->
-        captureUri?.let { uri ->
+        val uri = captureUri
+        if (uri != null) {
             if (success) {
                 onImageSelected(uri)
             } else {
-                // 拍照取消：清理 cache 残图，避免长期堆积
-                runCatching { uri.path?.let { File(it).delete() } }
+                // 拍照取消：直接删除缓存文件（FileProvider 的 content URI 的 uri.path 不是真实路径，
+                // 这里用拍照时保存的 File 对象删除，避免 cache 残图长期堆积）
+                runCatching { captureFile?.delete() }
             }
         }
+        captureUri = null
+        captureFile = null
     }
 
     val pickImage = rememberLauncherForActivityResult(
@@ -72,6 +77,7 @@ fun HomeScreen(onImageSelected: (Uri) -> Unit) {
                     "${context.packageName}.fileprovider",
                     file
                 )
+                captureFile = file
                 captureUri = uri
                 takePicture.launch(uri)
             },
@@ -96,7 +102,7 @@ fun HomeScreen(onImageSelected: (Uri) -> Unit) {
         }
         Spacer(Modifier.height(32.dp))
         Text(
-            "v0.3：拍照/选图 + 点词完整释义 + 整段翻译 + 查词 + 历史收藏；翻译引擎在设置页配置",
+            "v0.3：拍照/选图 + 点词完整释义 + 整段翻译 + 查词 + 历史收藏；默认 ML Kit 端侧翻译免配置，设置页可切换百度/有道",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

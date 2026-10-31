@@ -69,15 +69,18 @@ import com.cjajk.phototranslate.model.FavoriteItem
 import com.cjajk.phototranslate.model.LookupResult
 import com.cjajk.phototranslate.model.WordBox
 import com.cjajk.phototranslate.ocr.OcrManager
+import com.cjajk.phototranslate.translate.DictLookup
 import com.cjajk.phototranslate.translate.createTranslator
 import com.cjajk.phototranslate.ui.common.WordResultCard
 import com.cjajk.phototranslate.util.BitmapLoader
 import java.io.File
 import kotlin.comparisons.minOf
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private sealed interface OcrStatus {
     object Loading : OcrStatus
@@ -108,6 +111,7 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
     var bitmap by remember { mutableStateOf<Bitmap?>(null) }
     var boxes by remember { mutableStateOf<List<WordBox>>(emptyList()) }
     var resultLines by remember { mutableStateOf<List<String>>(emptyList()) }
+    var paragraphs by remember { mutableStateOf<List<List<String>>>(emptyList()) }
     var status by remember { mutableStateOf<OcrStatus>(OcrStatus.Loading) }
     var selected by remember { mutableStateOf<WordBox?>(null) }
     var wordLookup by remember { mutableStateOf<LookupState>(LookupState.Idle) }
@@ -115,56 +119,62 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
     var wholeTick by remember { mutableIntStateOf(0) }
     var favorited by remember { mutableStateOf(false) }
 
+    // 解码切 IO 线程避免主线程卡顿/ANR；无论成败，结束后清理拍照缓存残图
     LaunchedEffect(uri) {
         status = OcrStatus.Loading
-        val bmp = BitmapLoader.loadRotated(context, uri)
-        if (bmp == null) {
-            status = OcrStatus.Error("图片读取失败")
-            return@LaunchedEffect
-        }
-        bitmap = bmp
-        runCatching { OcrManager.recognize(bmp) }
-            .onSuccess { result ->
-                boxes = result.boxes
-                resultLines = result.lines
-                status = if (result.boxes.isEmpty()) OcrStatus.Empty else OcrStatus.Done
-                // 历史来源的照片已在历史库中，不再重复写入（避免把创建时间改成现在）；
-                // 新照片才压缩保存进历史。
-                if (result.lines.isNotEmpty()) {
-                    val historyDir = File(context.filesDir, "history").absolutePath
-                    val isHistory = uri.scheme == "file" && uri.path?.startsWith(historyDir) == true
-                    if (!isHistory) {
-                        HistoryStore.saveImage(context, uri)
-                            ?.let { HistoryStore.add(context, it, result.lines) }
+        try {
+            val bmp = withContext(Dispatchers.IO) { BitmapLoader.loadRotated(context, uri) }
+            if (bmp == null) {
+                status = OcrStatus.Error("图片读取失败")
+                return@LaunchedEffect
+            }
+            bitmap = bmp
+            runCatching { OcrManager.recognize(bmp) }
+                .onSuccess { result ->
+                    boxes = result.boxes
+                    resultLines = result.lines
+                    paragraphs = result.paragraphs
+                    status = if (result.boxes.isEmpty()) OcrStatus.Empty else OcrStatus.Done
+                    // 历史来源的照片已在历史库中，不再重复写入（避免把创建时间改成现在）；
+                    // 新照片才压缩保存进历史。
+                    if (result.lines.isNotEmpty()) {
+                        val historyDir = File(context.filesDir, "history").absolutePath
+                        val isHistory = uri.scheme == "file" && uri.path?.startsWith(historyDir) == true
+                        if (!isHistory) {
+                            HistoryStore.saveImage(context, uri)
+                                ?.let { HistoryStore.add(context, it, result.lines) }
+                        }
                     }
                 }
-            }
-            .onFailure { e ->
-                status = OcrStatus.Error(e.message ?: "OCR 失败（设备可能缺少 Google Play 服务）")
-            }
+                .onFailure { e ->
+                    status = OcrStatus.Error(e.message ?: "OCR 识别失败，请重试或换更清晰的图片")
+                }
+        } finally {
+            deleteCaptureCache(context, uri)
+        }
     }
 
-    // 点词完整释义（单词/词组走词典，句子降级普通译文）
+    // 点词完整释义：本地 ECDICT 优先 → 未命中回退在线引擎（单词/词组走词典，句子降级普通译文）
     LaunchedEffect(selected) {
         wordLookup = LookupState.Idle
         val word = selected ?: return@LaunchedEffect
         wordLookup = LookupState.Loading
         wordLookup = try {
             val settings = SettingsStore.settings(context).first()
-            val result = createTranslator(settings.engineType, settings.appId, settings.apiKey)
-                .lookup(word.text)
+            val translator = createTranslator(settings.engineType, settings.appId, settings.apiKey)
+            val result = DictLookup.lookup(context, translator, word.text)
             LookupState.Done(result)
         } catch (e: Exception) {
             LookupState.Error(e.message ?: "翻译失败")
         }
     }
 
-    // 整段翻译：请求计数器保证失败后可重试
+    // 整段翻译：按段落拼接（保留段落边界），请求计数器保证失败后可重试
     LaunchedEffect(wholeTick) {
         if (wholeTick == 0) return@LaunchedEffect
         wholeTranslate = TranslateState.Loading
         wholeTranslate = try {
-            val text = resultLines.joinToString(" ")
+            val text = paragraphs.joinToString("\n") { it.joinToString(" ") }
             if (text.isBlank()) throw IllegalStateException("没有可翻译的文本")
             val settings = SettingsStore.settings(context).first()
             val translated = createTranslator(settings.engineType, settings.appId, settings.apiKey)
@@ -229,7 +239,7 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
                     ) {
                         if (resultLines.isNotEmpty()) {
                             WholeTranslateCard(
-                                lines = resultLines,
+                                paragraphs = paragraphs,
                                 state = wholeTranslate,
                                 onRequest = { wholeTick++ },
                                 modifier = Modifier
@@ -309,15 +319,16 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
 
 @Composable
 private fun WholeTranslateCard(
-    lines: List<String>,
+    paragraphs: List<List<String>>,
     state: TranslateState,
     onRequest: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val fullText = paragraphs.joinToString("\n") { it.joinToString(" ") }
     Card(modifier) {
         Column(Modifier.padding(12.dp)) {
             Text(
-                lines.joinToString(" "),
+                fullText,
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
@@ -498,6 +509,16 @@ private fun OcrOverlay(
                 Icon(Icons.Filled.Refresh, contentDescription = "重置视图")
             }
         }
+    }
+}
+
+/** 删除拍照缓存残图：FileProvider 的 content URI 不能用 uri.path 删除，这里用真实 File 路径判断。 */
+private fun deleteCaptureCache(context: android.content.Context, uri: Uri) {
+    if (uri.scheme != "file") return
+    val path = uri.path ?: return
+    val cacheDir = context.cacheDir.absolutePath
+    if (path.startsWith(cacheDir)) {
+        runCatching { File(path).delete() }
     }
 }
 

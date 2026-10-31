@@ -37,15 +37,23 @@ class UnsupportedTranslator(private val engine: String) : Translator {
 fun targetLangFor(text: String): String =
     if (Regex("[\\u4e00-\\u9fff]").containsMatchIn(text)) "en" else "zh"
 
+/** 点词标点清洗：OCR 词元常带标点（tree.、"word"、弯引号 ’），先去掉首尾非字母数字字符，并统一弯引号为英文撇号。 */
+fun cleanWord(text: String): String {
+    var s = text.replace('’', '\'').replace('‘', '\'')
+    while (s.isNotEmpty() && !s.first().isLetterOrDigit()) s = s.substring(1)
+    while (s.isNotEmpty() && !s.last().isLetterOrDigit()) s = s.dropLast(1)
+    return s
+}
+
 /** 是否英文单词 / 词组（仅字母、连字符、空格），可尝试词典解析。 */
 private fun isWordOrPhrase(text: String): Boolean =
-    Regex("^[A-Za-z][A-Za-z'\\- ]*$").matches(text.trim())
+    Regex("^[A-Za-z][A-Za-z'\\- ]*$").matches(cleanWord(text))
 
 class BaiduTranslator(private val appId: String, private val apiKey: String) : Translator {
 
     override suspend fun translate(text: String): String = withContext(Dispatchers.IO) {
         requireKeys()
-        val key = "baidu|$text"
+        val key = "baidu|${text.trim()}"
         textCache.get(key)?.let { return@withContext it }
         val result = chunkByLength(text, 4500)
             .map { request(it).getJSONArray("trans_result").getJSONObject(0).getString("dst") }
@@ -56,14 +64,18 @@ class BaiduTranslator(private val appId: String, private val apiKey: String) : T
 
     override suspend fun lookup(text: String): LookupResult = withContext(Dispatchers.IO) {
         requireKeys()
-        val key = "baidu|$text"
+        val word = cleanWord(text)
+        if (word.isBlank()) {
+            return@withContext LookupResult(word = text.trim(), plainText = "", source = "baidu")
+        }
+        val key = "baidu|${word.lowercase()}"
         lookupCache.get(key)?.let { return@withContext it }
-        val json = request(text)
+        val json = request(word)
         val plain = json.getJSONArray("trans_result").getJSONObject(0).getString("dst")
-        val result = if (isWordOrPhrase(text)) {
-            parseDict(text.trim(), plain, json.optJSONObject("dict"))
+        val result = if (isWordOrPhrase(word)) {
+            parseDict(word, plain, json.optJSONObject("dict"))
         } else {
-            LookupResult(word = text.trim(), plainText = plain, source = "baidu")
+            LookupResult(word = word, plainText = plain, source = "baidu")
         }
         lookupCache.put(key, result)
         result
@@ -206,7 +218,7 @@ class YoudaoTranslator(private val appId: String, private val apiKey: String) : 
 
     override suspend fun translate(text: String): String = withContext(Dispatchers.IO) {
         requireKeys()
-        val key = "youdao|$text"
+        val key = "youdao|${text.trim()}"
         textCache.get(key)?.let { return@withContext it }
         val result = chunkByLength(text, 1800)
             .map { request(it) }
@@ -217,7 +229,8 @@ class YoudaoTranslator(private val appId: String, private val apiKey: String) : 
 
     override suspend fun lookup(text: String): LookupResult = withContext(Dispatchers.IO) {
         requireKeys()
-        LookupResult(word = text.trim(), plainText = translate(text), source = "youdao")
+        val word = cleanWord(text)
+        LookupResult(word = word, plainText = translate(word), source = "youdao")
     }
 
     private fun requireKeys() {
@@ -253,10 +266,11 @@ class YoudaoTranslator(private val appId: String, private val apiKey: String) : 
 /** Free Dictionary API（dictionaryapi.dev）：免密钥英英释义补充，失败静默降级为空。 */
 object FreeDictionaryApi {
     suspend fun lookup(word: String): List<String> = withContext(Dispatchers.IO) {
-        if (!Regex("^[A-Za-z][A-Za-z'\\-]*$").matches(word.trim())) return@withContext emptyList()
+        val w = cleanWord(word)
+        if (!Regex("^[A-Za-z][A-Za-z'\\-]*$").matches(w)) return@withContext emptyList()
         runCatching {
             val url = "https://api.dictionaryapi.dev/api/v2/entries/en/" +
-                URLEncoder.encode(word.trim().lowercase(), "UTF-8")
+                URLEncoder.encode(w.lowercase(), "UTF-8")
             val arr = JSONArray(httpGet(url))
             val out = mutableListOf<String>()
             for (i in 0 until arr.length()) {
@@ -280,12 +294,13 @@ object FreeDictionaryApi {
 }
 
 fun createTranslator(engine: String, appId: String, apiKey: String): Translator = when (engine) {
+    "mlkit" -> MlKitTranslator()
     "baidu" -> BaiduTranslator(appId, apiKey)
     "youdao" -> YoudaoTranslator(appId, apiKey)
     else -> UnsupportedTranslator(engine)
 }
 
-/** 超长文本按行分块，保证单次请求不超接口长度上限。 */
+/** 超长文本按行分块，单行本身超限时再按字符硬切，保证单次请求不超接口长度上限。 */
 private fun chunkByLength(text: String, max: Int): List<String> {
     if (text.length <= max) return listOf(text)
     val chunks = mutableListOf<String>()
@@ -293,6 +308,21 @@ private fun chunkByLength(text: String, max: Int): List<String> {
     text.lineSequence().forEach { raw ->
         val line = raw.trim()
         if (line.isEmpty()) return@forEach
+        if (line.length > max) {
+            if (sb.isNotEmpty()) {
+                chunks += sb.toString()
+                sb.clear()
+            }
+            var rest = line
+            while (rest.length > max) {
+                val space = rest.lastIndexOf(' ', max)
+                val idx = if (space > max / 2) space else max
+                chunks += rest.substring(0, idx).trim()
+                rest = rest.substring(idx).trim()
+            }
+            if (rest.isNotEmpty()) sb.append(rest)
+            return@forEach
+        }
         if (sb.isNotEmpty() && sb.length + line.length + 1 > max) {
             chunks += sb.toString()
             sb.clear()

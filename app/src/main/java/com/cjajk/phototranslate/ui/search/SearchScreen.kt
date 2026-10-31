@@ -43,6 +43,7 @@ import com.cjajk.phototranslate.data.SearchHistoryStore
 import com.cjajk.phototranslate.data.SettingsStore
 import com.cjajk.phototranslate.model.FavoriteItem
 import com.cjajk.phototranslate.model.LookupResult
+import com.cjajk.phototranslate.translate.DictLookup
 import com.cjajk.phototranslate.translate.createTranslator
 import com.cjajk.phototranslate.ui.common.WordResultCard
 import kotlinx.coroutines.flow.first
@@ -76,7 +77,7 @@ fun SearchScreen() {
                 val settings = SettingsStore.settings(context).first()
                 val translator = createTranslator(settings.engineType, settings.appId, settings.apiKey)
                 val result = if (Regex("^[A-Za-z][A-Za-z'\\- ]*$").matches(text)) {
-                    translator.lookup(text)
+                    DictLookup.lookup(context, translator, text)
                 } else {
                     LookupResult(word = text, plainText = translator.translate(text), source = "translate")
                 }

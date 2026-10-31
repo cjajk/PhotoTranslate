@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -56,13 +57,14 @@ fun SettingsScreen(onOpenTutorial: () -> Unit = {}) {
     }
 
     val engines = listOf(
-        "baidu" to "百度翻译（已接入）",
-        "youdao" to "有道智云（已接入）",
+        "mlkit" to "ML Kit 端侧翻译（默认，免配置，可离线）",
+        "baidu" to "百度翻译（已接入，需密钥）",
+        "youdao" to "有道智云（已接入，需密钥）",
         "tencent" to "腾讯翻译君（即将支持）",
         "deepl" to "DeepL（即将支持）",
         "offline" to "离线模型（即将支持）"
     )
-    val supported = setOf("baidu", "youdao")
+    val supported = setOf("mlkit", "baidu", "youdao")
 
     Scaffold(
         topBar = {
@@ -158,8 +160,8 @@ fun SettingsScreen(onOpenTutorial: () -> Unit = {}) {
                 Text(if (saved) "已保存" else "保存")
             }
             Text(
-                "密钥仅保存在本机（DataStore），不会上传；输入框默认密文显示，点击显示/隐藏可临时查看。\n" +
-                    "百度翻译开放平台、有道智云注册均为免费，把 APP ID 与密钥填到这里即可翻译。",
+                "默认引擎为 ML Kit 端侧翻译：首次使用会下载约 30MB 语言模型，之后离线可用，无需任何 key。" +
+                    "想获得更高质量的译文，可选百度/有道并填入自己的免费密钥（密钥仅保存在本机，不会上传；输入框默认密文显示，点击显示/隐藏可临时查看）。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
