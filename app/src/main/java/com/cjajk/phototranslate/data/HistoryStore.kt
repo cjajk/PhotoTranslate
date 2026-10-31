@@ -1,10 +1,12 @@
 package com.cjajk.phototranslate.data
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.cjajk.phototranslate.util.BitmapLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -12,6 +14,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
 
 private val Context.dataStore by preferencesDataStore(name = "history")
 
@@ -29,21 +32,33 @@ object HistoryStore {
     fun history(context: Context): Flow<List<HistoryItem>> =
         context.dataStore.data.map { prefs -> parse(prefs[KEY_HISTORY] ?: "[]") }
 
-    /** 把图片副本存进 App 私有目录，返回绝对路径；失败返回 null。 */
+    /**
+     * 把图片转正后压缩存入 App 私有目录（长边 ≤ 1600、JPEG 质量 80），
+     * 避免原图整份复制导致存储暴涨；失败返回 null。
+     */
     suspend fun saveImage(context: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
         runCatching {
             val dir = File(context.filesDir, "history").apply { mkdirs() }
             val target = File(dir, "img_${System.currentTimeMillis()}.jpg")
-            if (uri.scheme == "file") {
-                val src = File(uri.path!!)
-                src.inputStream().use { input -> target.outputStream().use { input.copyTo(it) } }
-            } else {
-                context.contentResolver.openInputStream(uri)?.use { input ->
-                    target.outputStream().use { input.copyTo(it) }
-                } ?: return@runCatching null
+            val bmp = BitmapLoader.loadRotated(context, uri) ?: return@runCatching null
+            val scaled = scaleToMax(bmp, 1600)
+            FileOutputStream(target).use { out ->
+                scaled.compress(Bitmap.CompressFormat.JPEG, 80, out)
             }
+            if (scaled !== bmp) scaled.recycle()
+            bmp.recycle()
             target.absolutePath
         }.getOrNull()
+    }
+
+    private fun scaleToMax(src: Bitmap, maxDim: Int): Bitmap {
+        val w = src.width
+        val h = src.height
+        if (w <= maxDim && h <= maxDim) return src
+        val ratio = maxDim.toFloat() / maxOf(w, h)
+        val nw = (w * ratio).toInt().coerceAtLeast(1)
+        val nh = (h * ratio).toInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(src, nw, nh, true)
     }
 
     /** 同图去重（按路径），超出上限删除最旧并清理文件。 */
