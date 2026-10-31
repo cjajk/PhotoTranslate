@@ -26,27 +26,35 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Generate offline dictionary (ECDICT)
+        run: |
+          mkdir -p app/src/main/assets
+          curl -sL -o /tmp/ecdict.csv https://raw.githubusercontent.com/skywind3000/ECDICT/master/ecdict.csv
+          python3 tools/build_dict.py /tmp/ecdict.csv app/src/main/assets/dict.sqlite
+
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: phototranslate-v0.1.0-debug
+          name: phototranslate-v0.3.0-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
       - name: Publish APK to Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.1.0
-          name: 拍照翻译 v0.1.0 (dev预览)
+          tag_name: v0.3.0
+          name: 拍照翻译 v0.3.0 (dev预览)
           body: |
-            v0.1.0 开发预览版
-            - 拍照 / 相册选图
-            - OCR 词框叠加（ML Kit，设备需带 Google Play 服务）
-            - 点词 + 收藏（本机保存）
-            - 设置页：翻译引擎配置（下一版启用翻译）
+            v0.3.0 开发预览版
+            - 拍照 / 相册选图，双指缩放 + 侧边 ＋/－ 按钮
+            - OCR 词框叠加（ML Kit 内置模型，不依赖 Google Play 服务）
+            - 默认 ML Kit 端侧翻译（免配置，可离线）；可选百度 / 有道
+            - 离线词典 ECDICT（53k+ 常用词）+ 在线词典回退
+            - 点词完整释义 / 整段翻译 / 手动查词 / 历史收藏
+            - 固定 debug 签名，后续版本可覆盖安装
           files: app/build/outputs/apk/debug/app-debug.apk
           draft: false
           prerelease: true

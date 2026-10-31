@@ -1,7 +1,17 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// 固定 debug 签名：仓库只存 base64 文本，构建时还原 keystore（本地/CI 使用同一把，保证用户可直接覆盖安装）
+val debugKeystoreFile = file("../keystore/debug.keystore")
+val debugKeystoreB64 = file("../keystore/debug.keystore.b64")
+if (!debugKeystoreFile.exists() && debugKeystoreB64.exists()) {
+    debugKeystoreFile.parentFile?.mkdirs()
+    debugKeystoreFile.writeBytes(Base64.getDecoder().decode(debugKeystoreB64.readText().trim()))
 }
 
 android {
@@ -14,6 +24,16 @@ android {
         targetSdk = 34
         versionCode = 3
         versionName = "0.3.0"
+    }
+
+    // 固定 debug 签名：本地与云端构建使用同一把 keystore，保证用户可直接覆盖安装
+    signingConfigs {
+        getByName("debug") {
+            storeFile = debugKeystoreFile
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
@@ -48,4 +68,5 @@ dependencies {
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:translate:17.0.3")
 }

@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.map
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
 data class AppSettings(
-    val engineType: String = "baidu",
+    val engineType: String = "mlkit",
     val appId: String = "",
     val apiKey: String = ""
 )
@@ -23,7 +23,7 @@ object SettingsStore {
 
     fun settings(context: Context): Flow<AppSettings> = context.dataStore.data.map { prefs ->
         AppSettings(
-            engineType = prefs[KEY_ENGINE] ?: "baidu",
+            engineType = prefs[KEY_ENGINE] ?: "mlkit",
             appId = prefs[KEY_APP_ID] ?: "",
             apiKey = prefs[KEY_API_KEY] ?: ""
         )

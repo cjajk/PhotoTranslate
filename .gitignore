@@ -8,3 +8,5 @@
 .externalNativeBuild
 .cxx
 local.properties
+keystore/debug.keystore
+app/src/main/assets/dict.sqlite
