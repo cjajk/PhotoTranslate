@@ -647,11 +647,11 @@ private fun OcrOverlay(
                         val bottom = wb.box.bottom * fitScale + offY
                         val isSelected = selecting && index in selectedIndices
                         drawRect(
-                            color = if (isSelected) Color(0xFF1E88E5).copy(alpha = 0.35f)
+                            color = if (isSelected) Color(0xFFE53935).copy(alpha = 0.45f)
                             else Color(0xFF1E88E5).copy(alpha = 0.6f),
                             topLeft = Offset(left, top),
                             size = Size(right - left, bottom - top),
-                            style = if (isSelected) Stroke(width = 3f) else Stroke(width = 2f)
+                            style = if (isSelected) Stroke(width = 4f) else Stroke(width = 2f)
                         )
                     }
                 }
