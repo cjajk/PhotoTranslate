@@ -17,7 +17,10 @@ object DictLookup {
         val word = cleanWord(text)
         if (word.isBlank()) return LookupResult(word = text.trim(), plainText = "", source = "plain")
         if (wordPattern.matches(word)) {
-            withContext(Dispatchers.IO) { DictDb.lookup(context, word) }?.let { return it }
+            withContext(Dispatchers.IO) {
+                // 精确命中优先；未命中时容错找回最接近的完整词（OCR 残词场景）
+                DictDb.lookup(context, word) ?: DictDb.fuzzyLookup(context, word)
+            }?.let { return it }
         }
         return translator.lookup(word)
     }

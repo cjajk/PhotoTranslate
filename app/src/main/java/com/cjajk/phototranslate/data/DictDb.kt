@@ -57,13 +57,99 @@ object DictDb {
         }
     }
 
+    /**
+     * 残词容错查询：OCR 识别不完整（如 traditional → traditiona）时自动找回最接近的完整词。
+     * 顺序：前缀匹配 → 去尾 1~2 字符精确查 → 编辑距离 ≤2（同首字母、长度相近，避免全表扫描）。
+     * 返回的 LookupResult.note 说明原始残词；彻底未命中返回 null。
+     */
+    fun fuzzyLookup(context: Context, word: String): LookupResult? {
+        val w = word.trim().lowercase()
+        if (w.isBlank() || w.length < 3) return null
+        val db = ensure(context)
+        return try {
+            // 1) 前缀匹配：选词频最高的最接近完整词
+            db.rawQuery(
+                "SELECT word,phonetic,translation,pos,tag,exchange FROM dict WHERE word LIKE ? ORDER BY frq DESC, bnc LIMIT 1",
+                arrayOf("$w%")
+            ).use { c ->
+                if (c.moveToFirst()) {
+                    val matched = c.getString(0)
+                    return buildResult(matched, c.getString(1), c.getString(2), c.getString(3), c.getString(4), c.getString(5), w)
+                }
+            }
+            // 2) 去尾 1~2 字符精确查（OCR 常见的截尾）
+            for (n in 1..2) {
+                if (w.length - n < 3) break
+                val stem = w.substring(0, w.length - n)
+                db.rawQuery(
+                    "SELECT word,phonetic,translation,pos,tag,exchange FROM dict WHERE word=?",
+                    arrayOf(stem)
+                ).use { c ->
+                    if (c.moveToFirst()) {
+                        return buildResult(stem, c.getString(1), c.getString(2), c.getString(3), c.getString(4), c.getString(5), w)
+                    }
+                }
+            }
+            // 3) 编辑距离 ≤2：同首字母 + 长度差 ≤2 缩小范围
+            var best: String? = null
+            var bestDist = 2
+            db.rawQuery(
+                "SELECT word FROM dict WHERE length(word) BETWEEN ? AND ? AND substr(word,1,1)=?",
+                arrayOf((w.length - 2).coerceAtLeast(2).toString(), (w.length + 2).toString(), w.first().toString())
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val cand = c.getString(0)
+                    val d = levenshtein(w, cand)
+                    if (d < bestDist) {
+                        bestDist = d
+                        best = cand
+                    }
+                }
+            }
+            val matched = best ?: return null
+            db.rawQuery(
+                "SELECT word,phonetic,translation,pos,tag,exchange FROM dict WHERE word=?",
+                arrayOf(matched)
+            ).use { c ->
+                if (!c.moveToFirst()) return null
+                buildResult(matched, c.getString(1), c.getString(2), c.getString(3), c.getString(4), c.getString(5), w)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** 编辑距离（Levenshtein）：最少增删改次数，用于残词与词典词的相似度比较。 */
+    private fun levenshtein(a: String, b: String): Int {
+        val m = a.length
+        val n = b.length
+        if (m == 0) return n
+        if (n == 0) return m
+        val dp = IntArray(n + 1) { it }
+        for (i in 1..m) {
+            var prev = dp[0]
+            dp[0] = i
+            for (j in 1..n) {
+                val tmp = dp[j]
+                dp[j] = minOf(
+                    dp[j] + 1,
+                    dp[j - 1] + 1,
+                    prev + if (a[i - 1] == b[j - 1]) 0 else 1
+                )
+                prev = tmp
+            }
+        }
+        return dp[n]
+    }
+
     private fun buildResult(
         word: String,
         phonetic: String?,
         translation: String?,
         pos: String?,
         tag: String?,
-        exchange: String?
+        exchange: String?,
+        fuzzyFrom: String? = null
     ): LookupResult {
         val posMeans = parseTranslation(translation ?: "")
         val plain = posMeans.firstOrNull()?.means?.joinToString("；")
@@ -76,7 +162,9 @@ object DictDb {
             posMeans = posMeans,
             exchange = parseExchange(exchange ?: ""),
             tags = parseTags(tag ?: ""),
-            source = "ecdict"
+            source = "ecdict",
+            note = fuzzyFrom?.takeIf { it != word }
+                ?.let { "未找到 $it，已展示最接近词 $word" } ?: ""
         )
     }
 

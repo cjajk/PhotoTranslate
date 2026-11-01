@@ -21,6 +21,8 @@ data class LookupResult(
     val tags: List<String> = emptyList(),
     /** 英英释义（百度 edict + Free Dictionary API 合并）。 */
     val englishDefinitions: List<String> = emptyList(),
+    /** 模糊匹配提示（OCR 残词找回完整词时说明，如"未找到 traditiona，已展示最接近词 traditional"）。 */
+    val note: String = "",
     /** 数据来源：baidu / youdao / translate / plain。 */
     val source: String = "plain"
 ) {

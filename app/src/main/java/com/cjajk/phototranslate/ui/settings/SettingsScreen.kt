@@ -58,13 +58,9 @@ fun SettingsScreen(onOpenTutorial: () -> Unit = {}) {
 
     val engines = listOf(
         "mlkit" to "ML Kit 端侧翻译（默认，免配置，可离线）",
-        "baidu" to "百度翻译（已接入，需密钥）",
-        "youdao" to "有道智云（已接入，需密钥）",
-        "tencent" to "腾讯翻译君（即将支持）",
-        "deepl" to "DeepL（即将支持）",
-        "offline" to "离线模型（即将支持）"
+        "baidu" to "百度翻译（需密钥）",
+        "youdao" to "有道智云（需密钥）"
     )
-    val supported = setOf("mlkit", "baidu", "youdao")
 
     Scaffold(
         topBar = {
@@ -91,17 +87,16 @@ fun SettingsScreen(onOpenTutorial: () -> Unit = {}) {
         ) {
             Text("翻译引擎", style = MaterialTheme.typography.titleMedium)
             engines.forEach { (value, label) ->
-                val enabled = value in supported
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .selectable(selected = engine == value, enabled = enabled, onClick = {
+                        .selectable(selected = engine == value, onClick = {
                             engine = value
                             saved = false
                         }),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    RadioButton(selected = engine == value, enabled = enabled, onClick = {
+                    RadioButton(selected = engine == value, onClick = {
                         engine = value
                         saved = false
                     })

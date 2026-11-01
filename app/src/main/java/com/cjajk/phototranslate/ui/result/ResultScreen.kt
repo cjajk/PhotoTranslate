@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -60,6 +61,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.cjajk.phototranslate.data.FavoritesStore
@@ -325,41 +327,64 @@ private fun WholeTranslateCard(
     modifier: Modifier = Modifier
 ) {
     val fullText = paragraphs.joinToString("\n") { it.joinToString(" ") }
-    Card(modifier) {
-        Column(Modifier.padding(12.dp)) {
-            Text(
-                fullText,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(8.dp))
-            Button(onClick = onRequest, modifier = Modifier.fillMaxWidth()) {
-                Text("翻译整段")
+    // 默认收起成窄条不挡图，点卡片展开/收起
+    var expanded by remember { mutableStateOf(false) }
+    Card(
+        modifier.clickable { expanded = !expanded }
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "整段翻译",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (expanded) "收起 ▴" else "展开 ▾",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
-            when (val t = state) {
-                TranslateState.Idle -> {}
-                TranslateState.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("翻译中…", style = MaterialTheme.typography.bodyMedium)
+            if (expanded) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    fullText,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(onClick = onRequest, modifier = Modifier.fillMaxWidth()) {
+                    Text("翻译整段")
                 }
-                is TranslateState.Done -> Column(
-                    Modifier
-                        .heightIn(max = 180.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    Text(
-                        t.text,
+                when (val t = state) {
+                    TranslateState.Idle -> {}
+                    TranslateState.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("翻译中…", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    is TranslateState.Done -> Column(
+                        Modifier
+                            .heightIn(max = 180.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Text(
+                            t.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    is TranslateState.Error -> Text(
+                        t.message,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.error
                     )
                 }
-                is TranslateState.Error -> Text(
-                    t.message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.error
-                )
             }
         }
     }

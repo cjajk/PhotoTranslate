@@ -34,6 +34,13 @@ fun WordResultCard(lookup: LookupResult, modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Text(lookup.word, style = MaterialTheme.typography.titleLarge)
+            if (lookup.note.isNotBlank()) {
+                Text(
+                    lookup.note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
             val ph = listOfNotNull(
                 lookup.phoneticEn?.let { "英 /$it/" },
                 lookup.phoneticAm?.let { "美 /$it/" }
