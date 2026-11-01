@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -35,7 +37,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -121,6 +125,15 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
     var wholeTick by remember { mutableIntStateOf(0) }
     var favorited by remember { mutableStateOf(false) }
 
+    // 长按选择模式：滑动多选词框 → 拼句翻译
+    var selecting by remember { mutableStateOf(false) }
+    var selectedIndices by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var sentenceText by remember { mutableStateOf("") }
+    var sentenceTranslate by remember { mutableStateOf<TranslateState>(TranslateState.Idle) }
+    var sentenceTick by remember { mutableIntStateOf(0) }
+    var showSentence by remember { mutableStateOf(false) }
+    var sentenceFavorited by remember { mutableStateOf(false) }
+
     // 解码切 IO 线程避免主线程卡顿/ANR；无论成败，结束后清理拍照缓存残图
     LaunchedEffect(uri) {
         status = OcrStatus.Loading
@@ -177,6 +190,22 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
         wholeTranslate = TranslateState.Loading
         wholeTranslate = try {
             val text = paragraphs.joinToString("\n") { it.joinToString(" ") }
+            if (text.isBlank()) throw IllegalStateException("没有可翻译的文本")
+            val settings = SettingsStore.settings(context).first()
+            val translated = createTranslator(settings.engineType, settings.appId, settings.apiKey)
+                .translate(text)
+            TranslateState.Done(translated)
+        } catch (e: Exception) {
+            TranslateState.Error(e.message ?: "翻译失败")
+        }
+    }
+
+    // 选中句子翻译：长按选择的词拼成句子，走当前引擎整句翻译
+    LaunchedEffect(sentenceTick) {
+        if (sentenceTick == 0) return@LaunchedEffect
+        sentenceTranslate = TranslateState.Loading
+        sentenceTranslate = try {
+            val text = sentenceText
             if (text.isBlank()) throw IllegalStateException("没有可翻译的文本")
             val settings = SettingsStore.settings(context).first()
             val translated = createTranslator(settings.engineType, settings.appId, settings.apiKey)
@@ -256,6 +285,31 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
                                 selected = word
                                 favorited = false
                             },
+                            selecting = selecting,
+                            selectedIndices = selectedIndices,
+                            onEnterSelect = { index ->
+                                selecting = true
+                                selectedIndices = setOf(index)
+                            },
+                            onDragSelect = { index ->
+                                if (selecting) selectedIndices = selectedIndices + index
+                            },
+                            onTapSelect = { index ->
+                                selectedIndices =
+                                    if (index in selectedIndices) selectedIndices - index
+                                    else selectedIndices + index
+                            },
+                            onRequestSentence = { text ->
+                                sentenceText = text
+                                sentenceTranslate = TranslateState.Idle
+                                sentenceFavorited = false
+                                showSentence = true
+                                sentenceTick++
+                            },
+                            onExitSelect = {
+                                selecting = false
+                                selectedIndices = emptySet()
+                            },
                             modifier = Modifier
                                 .fillMaxSize()
                                 .weight(1f)
@@ -312,6 +366,68 @@ fun ResultScreen(uri: Uri, onBack: () -> Unit) {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(if (favorited) "已收藏" else "收藏到复习")
+                }
+                Spacer(Modifier.height(24.dp))
+            }
+        }
+    }
+
+    // 选中句子翻译结果面板：原文 + 译文 + 收藏整句
+    if (showSentence && sentenceText.isNotBlank()) {
+        ModalBottomSheet(onDismissRequest = { showSentence = false }) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
+            ) {
+                Text(
+                    "选中的句子",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(sentenceText, style = MaterialTheme.typography.titleLarge)
+                Spacer(Modifier.height(12.dp))
+                when (val t = sentenceTranslate) {
+                    TranslateState.Idle -> {}
+                    TranslateState.Loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("翻译中…", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    is TranslateState.Done -> Column {
+                        Text(
+                            t.text,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    FavoritesStore.add(
+                                        context,
+                                        FavoriteItem(
+                                            text = sentenceText,
+                                            type = "SENTENCE",
+                                            translation = t.text,
+                                            createdAt = System.currentTimeMillis()
+                                        )
+                                    )
+                                    sentenceFavorited = true
+                                }
+                            },
+                            enabled = !sentenceFavorited,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (sentenceFavorited) "已收藏" else "收藏到复习")
+                        }
+                    }
+                    is TranslateState.Error -> Text(
+                        t.message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
                 Spacer(Modifier.height(24.dp))
             }
@@ -395,6 +511,13 @@ private fun OcrOverlay(
     bitmap: Bitmap,
     boxes: List<WordBox>,
     onWordTap: (WordBox) -> Unit,
+    selecting: Boolean,
+    selectedIndices: Set<Int>,
+    onEnterSelect: (Int) -> Unit,
+    onDragSelect: (Int) -> Unit,
+    onTapSelect: (Int) -> Unit,
+    onRequestSentence: (String) -> Unit,
+    onExitSelect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -441,30 +564,59 @@ private fun OcrOverlay(
         // 手势采集放在未做渲染变换的外层节点，坐标统一在外层（屏幕相对）坐标系；
         // 渲染变换单独放内层，避免命中坐标被框架二次反变换导致放大后点偏。
         // 缩放围绕双指质心：保持质心在屏幕上不动，倍率越大画面也不会漂移。
+        // 选择模式下禁用双指缩放（避免滑选误触发），改为长按进入 + 滑动连续选中。
         Box(
             Modifier
                 .fillMaxSize()
-                .pointerInput(boxes, fitScale, offX, offY) {
+                .pointerInput(boxes, fitScale, offX, offY, selecting) {
                     coroutineScope {
-                        launch {
-                            detectTransformGestures { centroid, pan, zoom, _ ->
-                                val newScale = (userScale * zoom).coerceIn(1f, 6f)
-                                userOffset = centroid + (userOffset - centroid) * (newScale / userScale) + pan
-                                userScale = newScale
-                                if (userScale <= 1.001f) {
-                                    userOffset = Offset.Zero
-                                } else {
-                                    userOffset = clampOffset(
-                                        userOffset, cw, ch, offX, offY, imgW, imgH, fitScale, userScale
-                                    )
+                        if (!selecting) {
+                            launch {
+                                detectTransformGestures { centroid, pan, zoom, _ ->
+                                    val newScale = (userScale * zoom).coerceIn(1f, 6f)
+                                    userOffset = centroid + (userOffset - centroid) * (newScale / userScale) + pan
+                                    userScale = newScale
+                                    if (userScale <= 1.001f) {
+                                        userOffset = Offset.Zero
+                                    } else {
+                                        userOffset = clampOffset(
+                                            userOffset, cw, ch, offX, offY, imgW, imgH, fitScale, userScale
+                                        )
+                                    }
+                                    showControls()
                                 }
-                                showControls()
                             }
                         }
                         launch {
-                            detectTapGestures { tap ->
-                                val inv = (tap - userOffset) / userScale
-                                pickBox(inv, boxes, fitScale, offX, offY, userScale)?.let(onWordTap)
+                            detectTapGestures(
+                                onTap = { tap ->
+                                    val inv = (tap - userOffset) / userScale
+                                    if (selecting) {
+                                        pickBoxIndex(inv, boxes, fitScale, offX, offY, userScale)?.let(onTapSelect)
+                                    } else {
+                                        pickBoxIndex(inv, boxes, fitScale, offX, offY, userScale)
+                                            ?.let { idx -> onWordTap(boxes[idx]) }
+                                    }
+                                },
+                                onLongPress = { tap ->
+                                    if (!selecting) {
+                                        val inv = (tap - userOffset) / userScale
+                                        pickBoxIndex(inv, boxes, fitScale, offX, offY, userScale)?.let(onEnterSelect)
+                                    }
+                                }
+                            )
+                        }
+                        if (selecting) {
+                            // 滑动多选：按下与拖动路径上命中的词框连续选中
+                            val hit: (Offset) -> Unit = { pos ->
+                                val inv = (pos - userOffset) / userScale
+                                pickBoxIndex(inv, boxes, fitScale, offX, offY, userScale)?.let(onDragSelect)
+                            }
+                            launch {
+                                detectDragGestures(
+                                    onDragStart = hit,
+                                    onDrag = { change, _ -> hit(change.position) }
+                                )
                             }
                         }
                     }
@@ -488,16 +640,18 @@ private fun OcrOverlay(
                     contentScale = ContentScale.Fit
                 )
                 Canvas(Modifier.fillMaxSize()) {
-                    boxes.forEach { wb ->
+                    boxes.forEachIndexed { index, wb ->
                         val left = wb.box.left * fitScale + offX
                         val top = wb.box.top * fitScale + offY
                         val right = wb.box.right * fitScale + offX
                         val bottom = wb.box.bottom * fitScale + offY
+                        val isSelected = selecting && index in selectedIndices
                         drawRect(
-                            color = Color(0xFF1E88E5).copy(alpha = 0.6f),
+                            color = if (isSelected) Color(0xFF1E88E5).copy(alpha = 0.35f)
+                            else Color(0xFF1E88E5).copy(alpha = 0.6f),
                             topLeft = Offset(left, top),
                             size = Size(right - left, bottom - top),
-                            style = Stroke(width = 2f)
+                            style = if (isSelected) Stroke(width = 3f) else Stroke(width = 2f)
                         )
                     }
                 }
@@ -532,6 +686,43 @@ private fun OcrOverlay(
                     .padding(12.dp)
             ) {
                 Icon(Icons.Filled.Refresh, contentDescription = "重置视图")
+            }
+        }
+
+        // 选择模式顶部工具条：已选数量 + 翻译选中 + 取消
+        if (selecting) {
+            val selectedSentence = selectedIndices
+                .sortedWith(compareBy({ boxes[it].box.top }, { boxes[it].box.left }))
+                .map { boxes[it].text }
+                .joinToString(" ")
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 8.dp),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                tonalElevation = 3.dp
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "已选 ${selectedIndices.size} 个词",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { onRequestSentence(selectedSentence) },
+                        enabled = selectedIndices.isNotEmpty()
+                    ) {
+                        Text("翻译选中")
+                    }
+                    TextButton(onClick = onExitSelect) {
+                        Text("取消")
+                    }
+                }
             }
         }
     }
@@ -575,19 +766,20 @@ private fun clampOffset(
 /**
  * 命中策略：先判断触点落在哪个词框内（外扩少量边距，多个命中选面积最贴合的）；
  * 框外再走最近中心匹配，阈值随放大倍率收紧，避免放大后跨词误选。
+ * 返回词框在 boxes 中的 index；未命中返回 null。
  */
-private fun pickBox(
+private fun pickBoxIndex(
     tap: Offset,
     boxes: List<WordBox>,
     scale: Float,
     offX: Float,
     offY: Float,
     zoom: Float
-): WordBox? {
+): Int? {
     val pad = 6f / zoom
-    var inside: WordBox? = null
+    var inside: Int? = null
     var insideArea = Float.MAX_VALUE
-    boxes.forEach { wb ->
+    boxes.forEachIndexed { index, wb ->
         val l = wb.box.left * scale + offX
         val t = wb.box.top * scale + offY
         val r = wb.box.right * scale + offX
@@ -596,16 +788,16 @@ private fun pickBox(
             val area = (r - l) * (b - t)
             if (area < insideArea) {
                 insideArea = area
-                inside = wb
+                inside = index
             }
         }
     }
     if (inside != null) return inside
 
     val threshold = 90f / zoom
-    var best: WordBox? = null
+    var best: Int? = null
     var bestDist = threshold * threshold
-    boxes.forEach { wb ->
+    boxes.forEachIndexed { index, wb ->
         val cx = wb.box.exactCenterX() * scale + offX
         val cy = wb.box.exactCenterY() * scale + offY
         val dx = tap.x - cx
@@ -613,7 +805,7 @@ private fun pickBox(
         val d = dx * dx + dy * dy
         if (d < bestDist) {
             bestDist = d
-            best = wb
+            best = index
         }
     }
     return best
