@@ -29,7 +29,8 @@ jobs:
       - name: Generate offline dictionary (ECDICT)
         run: |
           mkdir -p app/src/main/assets
-          curl -sL -o /tmp/ecdict.csv https://raw.githubusercontent.com/skywind3000/ECDICT/master/ecdict.csv
+          curl -sL -o /tmp/ecdict.csv https://raw.githubusercontent.com/skywind3000/ECDICT/ab22ad36302cafc6349a050e2b60894855208055/ecdict.csv
+          echo "d1ecbdf9ee2b920afb6f430ca6b6bb9f559588cf0dff86e04bd255f9390843cc  /tmp/ecdict.csv" | sha256sum -c -
           python3 tools/build_dict.py /tmp/ecdict.csv app/src/main/assets/dict.sqlite
 
       - name: Build debug APK

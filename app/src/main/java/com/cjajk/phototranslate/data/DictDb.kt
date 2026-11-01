@@ -170,14 +170,19 @@ object DictDb {
 
     private fun parseTranslation(translation: String): List<PosMeaning> {
         val out = mutableListOf<PosMeaning>()
-        translation.lineSequence().forEach { raw ->
+        // ECDICT 真实入库格式：词性行用字面 "\n"（反斜杠+n 文本）分隔、义项用半角逗号分隔，
+        // 例：vt. 放弃, 抛弃\nn. 放任, 无拘束。
+        // 先把字面转义归一化成真换行（同时兼容真换行），再逐行解析；
+        // 义项同时按 逗号/分号（中英文）拆分，避免多词性词条糊成一条脏释义。
+        val normalized = translation.replace("\\n", "\n")
+        normalized.lineSequence().forEach { raw ->
             val line = raw.trim()
             if (line.isEmpty() || line.startsWith("[")) return@forEach
             val m = Regex("^([a-z]+)\\.\\s*(.+)$").find(line)
             if (m != null) {
                 val part = m.groupValues[1]
                 val means = m.groupValues[2]
-                    .split(Regex("[；;]"))
+                    .split(Regex("[，,；;]"))
                     .map { it.trim() }
                     .filter { it.isNotBlank() }
                 if (means.isNotEmpty()) out += PosMeaning(part, means)
